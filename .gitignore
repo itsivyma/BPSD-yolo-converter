@@ -1,0 +1,38 @@
+# macOS
+.DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Virtual environments
+.venv*/
+venv/
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# User datasets and uploads
+data/
+uploads/
+outputs/
+notes.json
+labels/
+images/
+
+# Generated QA and spreadsheet files
+first_box_test.png
+all_boxes_test.png
+*_QA.png
+Beethoven_*.csv
+Beethoven_*.xlsx
+
+# Private tutorial documents
+BPSD_YOLO_自動轉換系統詳細流程.md
+BPSD_YOLO_流程說明.md
