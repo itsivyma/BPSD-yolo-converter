@@ -1,10 +1,11 @@
 import csv
 import io
 import json
-import xml.etree.ElementTree as ET
+import math
 
 from PIL import Image, ImageDraw
 from openpyxl import Workbook
+
 
 def load_categories(json_file):
     data = json.load(json_file)
@@ -36,38 +37,6 @@ def load_categories(json_file):
         categories[class_id] = class_name
 
     return categories
-
-
-def load_xml_labels(xml_file):
-    try:
-        tree = ET.parse(xml_file)
-    except ET.ParseError as error:
-        raise ValueError(
-            f"XML 格式無效：{error}"
-        ) from error
-
-    labels = set()
-
-    for element in tree.getroot().iter():
-        tag_name = element.tag.split("}")[-1]
-
-        if tag_name != "Label":
-            continue
-
-        class_name = element.attrib.get(
-            "value",
-            "",
-        ).strip()
-
-        if class_name:
-            labels.add(class_name)
-
-    if not labels:
-        raise ValueError(
-            "XML 中找不到任何 Label"
-        )
-
-    return labels
 
 
 def load_yolo_txt(txt_file):
@@ -130,41 +99,56 @@ def validate_box(box, categories):
             f"未知 class_id：{class_id}"
         )
 
+    finite_fields = {}
+
     for field_name, value in [
         ("x", x),
         ("y", y),
         ("w", w),
         ("h", h),
     ]:
+        finite_fields[field_name] = math.isfinite(value)
+
+        if not finite_fields[field_name]:
+            errors.append(
+                f"{field_name} 必須是有限數值：{value}"
+            )
+            continue
+
         if value < 0 or value > 1:
             errors.append(
                 f"{field_name} 不在 0–1：{value}"
             )
 
-    if w <= 0:
+    if finite_fields["w"] and w <= 0:
         errors.append("w 必須大於 0")
 
-    if h <= 0:
+    if finite_fields["h"] and h <= 0:
         errors.append("h 必須大於 0")
 
-    left = x - w / 2
-    top = y - h / 2
-    right = x + w / 2
-    bottom = y + h / 2
+    if all(finite_fields.values()):
+        left = x - w / 2
+        top = y - h / 2
+        right = x + w / 2
+        bottom = y + h / 2
 
-    if left < 0:
-        errors.append("框的左邊超出圖片")
+        if left < 0:
+            errors.append("框的左邊超出圖片")
 
-    if top < 0:
-        errors.append("框的上方超出圖片")
+        if top < 0:
+            errors.append("框的上方超出圖片")
 
-    if right > 1:
-        errors.append("框的右邊超出圖片")
+        if right > 1:
+            errors.append("框的右邊超出圖片")
 
-    if bottom > 1:
-        errors.append("框的下方超出圖片")
+        if bottom > 1:
+            errors.append("框的下方超出圖片")
 
-    if w > 0.5 or h > 0.5:
+    if (
+        finite_fields["w"]
+        and finite_fields["h"]
+        and (w > 0.5 or h > 0.5)
+    ):
         warnings.append(
             "此 bounding box 非常大，請人工確認"
         )
@@ -209,6 +193,23 @@ def draw_boxes(
     image_width, image_height = output.size
 
     for box in boxes:
+        errors, warnings = validate_box(
+            box,
+            categories,
+        )
+
+        coordinates_are_drawable = (
+            all(
+                math.isfinite(box[field_name])
+                for field_name in ("x", "y", "w", "h")
+            )
+            and box["w"] > 0
+            and box["h"] > 0
+        )
+
+        if not coordinates_are_drawable:
+            continue
+
         pixel_box = yolo_to_pixels(
             box,
             image_width,
@@ -219,10 +220,6 @@ def draw_boxes(
         class_name = categories.get(
             class_id,
             "UNKNOWN",
-        )
-        errors, warnings = validate_box(
-            box,
-            categories,
         )
 
         if errors:
@@ -285,6 +282,56 @@ def make_csv(boxes):
     return output.getvalue()
 
 
+def sonata_name_from_page(page_name):
+    stem = str(page_name)
+
+    if stem.lower().endswith(".txt"):
+        stem = stem[:-4]
+
+    name_parts = stem.rsplit("-", 2)
+
+    if (
+        len(name_parts) != 3
+        or not name_parts[1].isdigit()
+        or not name_parts[2].isdigit()
+    ):
+        raise ValueError(
+            f"無法辨識頁面檔名格式：{page_name}"
+        )
+
+    return name_parts[0]
+
+
+def _safe_worksheet_title(page_name, used_titles):
+    invalid_characters = set("[]:*?/\\")
+    cleaned_name = "".join(
+        "_"
+        if character in invalid_characters
+        else character
+        for character in str(page_name)
+    ).strip().strip("'")
+
+    if not cleaned_name:
+        cleaned_name = "Page"
+
+    if cleaned_name.startswith(("=", "+", "-", "@")):
+        cleaned_name = f"Page_{cleaned_name}"
+
+    base_title = cleaned_name[:31]
+    candidate = base_title
+    suffix_number = 2
+
+    while candidate.casefold() in used_titles:
+        suffix = f"_{suffix_number}"
+        candidate = (
+            f"{base_title[:31 - len(suffix)]}{suffix}"
+        )
+        suffix_number += 1
+
+    used_titles.add(candidate.casefold())
+    return candidate
+
+
 def make_xlsx(page_boxes):
     workbook = Workbook()
 
@@ -296,22 +343,30 @@ def make_xlsx(page_boxes):
         "box_count",
     ])
 
+    used_titles = {"summary"}
+
     for page_name in sorted(page_boxes):
         boxes = page_boxes[page_name]
+        summary_row = summary_sheet.max_row + 1
+        page_name_cell = summary_sheet.cell(
+            row=summary_row,
+            column=1,
+        )
+        page_name_cell.value = str(page_name)
+        page_name_cell.data_type = "s"
+        summary_sheet.cell(
+            row=summary_row,
+            column=2,
+            value=len(boxes),
+        )
 
-        if len(page_name) > 31:
-            raise ValueError(
-                f"工作表名稱超過 31 個字元："
-                f"{page_name}"
-            )
-
-        summary_sheet.append([
+        sheet_title = _safe_worksheet_title(
             page_name,
-            len(boxes),
-        ])
+            used_titles,
+        )
 
         sheet = workbook.create_sheet(
-            title=page_name,
+            title=sheet_title,
         )
 
         sheet.append([

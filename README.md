@@ -14,6 +14,8 @@ A local Streamlit application for validating YOLO bounding-box annotations, conv
 - Download a QA overlay PNG.
 - Group pages from the same sonata into a multi-sheet Excel workbook.
 - Run automated coordinate tests with pytest.
+- Reject malformed, oversized, or duplicate uploaded files.
+- Sanitize Excel worksheet names and filename-like text.
 
 ## YOLO format
 
@@ -79,6 +81,11 @@ Beethoven_Op090-01-01.txt
 Beethoven_Op090-01-01.jpeg
 ```
 
+Each file can be up to 5 MB for JSON/TXT or 50 MB for
+images. At most 100 TXT files and 100 images can be processed
+in one run. Duplicate TXT filenames and duplicate image stems
+are rejected instead of being overwritten silently.
+
 ## Outputs
 
 ### Page CSV
@@ -96,6 +103,16 @@ The selected page can be downloaded with its bounding boxes drawn over the origi
 ### Sonata Excel workbook
 
 Pages with the same sonata prefix can be downloaded as one `.xlsx` workbook.
+
+Page filenames must end with two numeric parts in this form:
+
+```text
+<sonata name>-<movement number>-<page number>
+```
+
+The sonata name itself may contain hyphens. For example,
+`Composer-Name_Op090-01-06.txt` belongs to
+`Composer-Name_Op090.xlsx`.
 
 Example:
 
@@ -135,6 +152,12 @@ python -m pytest -v
 This repository does not include score images, annotations, exported CSV files, Excel workbooks, or other dataset files.
 
 Uploaded files are processed by the locally running Streamlit application.
+
+## License
+
+No software license has been selected yet. Until a license is
+added, copyright law reserves reuse, modification, and
+redistribution rights to the copyright holder.
 
 ## Current scope
 

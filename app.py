@@ -1,7 +1,8 @@
 import io
-from PIL import Image
-
+import warnings
 from pathlib import Path
+
+from PIL import Image, UnidentifiedImageError
 import streamlit as st
 
 from converter import (
@@ -10,8 +11,28 @@ from converter import (
     load_yolo_txt,
     make_csv,
     make_xlsx,
+    sonata_name_from_page,
     validate_box,
 )
+
+
+MAX_TEXT_FILE_BYTES = 5 * 1024 * 1024
+MAX_IMAGE_FILE_BYTES = 50 * 1024 * 1024
+MAX_FILES_PER_TYPE = 100
+
+
+def find_duplicate_keys(files, key_function):
+    counts = {}
+
+    for uploaded_file in files:
+        key = key_function(uploaded_file)
+        counts[key] = counts.get(key, 0) + 1
+
+    return sorted(
+        key
+        for key, count in counts.items()
+        if count > 1
+    )
 
 
 st.set_page_config(
@@ -45,6 +66,71 @@ image_files = st.file_uploader(
     type=["jpg", "jpeg", "png"],
     accept_multiple_files=True,
 )
+
+if (
+    notes_file is not None
+    and notes_file.size > MAX_TEXT_FILE_BYTES
+):
+    st.error("notes.json 超過 5 MB，已停止處理")
+    notes_file = None
+
+if len(txt_files) > MAX_FILES_PER_TYPE:
+    st.error("YOLO TXT 超過 100 個，已停止處理")
+    txt_files = []
+
+oversized_txt_files = [
+    txt_file.name
+    for txt_file in txt_files
+    if txt_file.size > MAX_TEXT_FILE_BYTES
+]
+
+if oversized_txt_files:
+    st.error(
+        "以下 TXT 超過 5 MB，已停止處理："
+        + ", ".join(oversized_txt_files)
+    )
+    txt_files = []
+
+duplicate_txt_names = find_duplicate_keys(
+    txt_files,
+    lambda txt_file: txt_file.name,
+)
+
+if duplicate_txt_names:
+    st.error(
+        "發現重複 TXT 檔名，已停止處理："
+        + ", ".join(duplicate_txt_names)
+    )
+    txt_files = []
+
+if len(image_files) > MAX_FILES_PER_TYPE:
+    st.error("圖片超過 100 張，已停止處理")
+    image_files = []
+
+oversized_image_files = [
+    image_file.name
+    for image_file in image_files
+    if image_file.size > MAX_IMAGE_FILE_BYTES
+]
+
+if oversized_image_files:
+    st.error(
+        "以下圖片超過 50 MB，已停止處理："
+        + ", ".join(oversized_image_files)
+    )
+    image_files = []
+
+duplicate_image_stems = find_duplicate_keys(
+    image_files,
+    lambda image_file: Path(image_file.name).stem,
+)
+
+if duplicate_image_stems:
+    st.error(
+        "發現重複圖片主檔名，已停止處理："
+        + ", ".join(duplicate_image_stems)
+    )
+    image_files = []
 
 
 categories = None
@@ -101,7 +187,7 @@ if categories is not None and boxes is not None:
     validation_warnings = []
 
     for box in boxes:
-        errors, warnings = validate_box(
+        errors, box_warnings = validate_box(
             box,
             categories,
         )
@@ -111,7 +197,7 @@ if categories is not None and boxes is not None:
                 f'第 {box["line_number"]} 列：{message}'
             )
 
-        for message in warnings:
+        for message in box_warnings:
             validation_warnings.append(
                 f'第 {box["line_number"]} 列：{message}'
             )
@@ -157,45 +243,62 @@ if categories is not None and boxes is not None:
         )
     else:
         selected_image = image_options[txt_stem]
-        selected_image.seek(0)
 
-        image = Image.open(selected_image)
+        try:
+            selected_image.seek(0)
 
-        show_labels = st.checkbox(
-            "顯示 class ID 與名稱",
-            value=False,
-        )
+            with warnings.catch_warnings():
+                warnings.simplefilter(
+                    "error",
+                    Image.DecompressionBombWarning,
+                )
+                image = Image.open(selected_image)
+                image.load()
+        except (
+            UnidentifiedImageError,
+            OSError,
+            Image.DecompressionBombError,
+            Image.DecompressionBombWarning,
+        ) as error:
+            st.error(
+                f"圖片無法安全開啟：{error}"
+            )
+        else:
+            show_labels = st.checkbox(
+                "顯示 class ID 與名稱",
+                value=False,
+            )
 
-        preview = draw_boxes(
-            image,
-            boxes,
-            categories,
-            show_labels=show_labels,
-        )
+            preview = draw_boxes(
+                image,
+                boxes,
+                categories,
+                show_labels=show_labels,
+            )
 
-        st.caption(
-            f"圖片尺寸："
-            f"{image.width} × {image.height} px"
-        )
+            st.caption(
+                f"圖片尺寸："
+                f"{image.width} × {image.height} px"
+            )
 
-        st.image(
-            preview,
-            caption=selected_image.name,
-            use_container_width=True,
-        )
-        qa_buffer = io.BytesIO()
+            st.image(
+                preview,
+                caption=selected_image.name,
+                use_container_width=True,
+            )
+            qa_buffer = io.BytesIO()
 
-        preview.save(
-            qa_buffer,
-            format="PNG",
-        )
+            preview.save(
+                qa_buffer,
+                format="PNG",
+            )
 
-        st.download_button(
-            label="下載 QA 疊圖 PNG",
-            data=qa_buffer.getvalue(),
-            file_name=f"{txt_stem}_QA.png",
-            mime="image/png",
-        )
+            st.download_button(
+                label="下載 QA 疊圖 PNG",
+                data=qa_buffer.getvalue(),
+                file_name=f"{txt_stem}_QA.png",
+                mime="image/png",
+            )
 
 
 if categories is not None and boxes is not None:
@@ -225,16 +328,16 @@ if categories is not None and txt_files:
 
     for uploaded_txt in txt_files:
         page_name = Path(uploaded_txt.name).stem
-        name_parts = page_name.split("-")
 
-        if len(name_parts) < 3:
+        try:
+            sonata_name = sonata_name_from_page(
+                page_name
+            )
+        except ValueError as error:
             batch_read_errors.append(
-                f"無法辨識檔名格式："
-                f"{uploaded_txt.name}"
+                str(error)
             )
             continue
-
-        sonata_name = name_parts[0]
 
         try:
             uploaded_txt.seek(0)
@@ -288,7 +391,7 @@ if categories is not None and txt_files:
             selected_pages.items()
         ):
             for box in page_boxes:
-                errors, warnings = validate_box(
+                errors, box_warnings = validate_box(
                     box,
                     categories,
                 )
@@ -300,7 +403,7 @@ if categories is not None and txt_files:
                         f"{message}"
                     )
 
-                for message in warnings:
+                for message in box_warnings:
                     sonata_warnings.append(
                         f"{page_name} "
                         f'第 {box["line_number"]} 列：'
@@ -340,19 +443,37 @@ if categories is not None and txt_files:
                 "\n".join(sonata_warnings)
             )
 
-        xlsx_data = make_xlsx(
-            selected_pages
+        excel_is_blocked = bool(
+            batch_read_errors
+            or sonata_errors
         )
 
-        st.download_button(
-            label="下載整首 Sonata Excel",
-            data=xlsx_data,
-            file_name=(
-                f"{selected_sonata}.xlsx"
-            ),
-            mime=(
-                "application/vnd.openxmlformats-"
-                "officedocument.spreadsheetml.sheet"
-            ),
-            disabled=bool(sonata_errors),
-        )
+        if excel_is_blocked:
+            st.button(
+                "下載整首 Sonata Excel",
+                disabled=True,
+            )
+            st.caption(
+                "請先修正所有批次讀取與驗證錯誤。"
+            )
+        else:
+            try:
+                xlsx_data = make_xlsx(
+                    selected_pages
+                )
+            except (ValueError, OSError) as error:
+                st.error(
+                    f"Excel 建立失敗：{error}"
+                )
+            else:
+                st.download_button(
+                    label="下載整首 Sonata Excel",
+                    data=xlsx_data,
+                    file_name=(
+                        f"{selected_sonata}.xlsx"
+                    ),
+                    mime=(
+                        "application/vnd.openxmlformats-"
+                        "officedocument.spreadsheetml.sheet"
+                    ),
+                )
