@@ -16,6 +16,8 @@ A local Streamlit application for validating YOLO bounding-box annotations, conv
 - Run automated coordinate tests with pytest.
 - Reject malformed, oversized, or duplicate uploaded files.
 - Sanitize Excel worksheet names and filename-like text.
+- Experimentally align scan-page YOLO symbols with BPSD MusicXML and
+  note annotations for offline QA.
 
 ## YOLO format
 
@@ -136,15 +138,72 @@ class_id | x | y | w | h
 python -m pytest -v
 ```
 
+## Experimental MusicXML alignment
+
+The alignment tools are a separate offline research workflow. They do
+not change the five-column output of the Streamlit application.
+
+The workflow uses external copies of:
+
+- a scanned score page and its YOLO TXT file;
+- the matching `notes.json` class mapping;
+- the matching BPSD MusicXML file;
+- BPSD note annotations when note IDs are required; and
+- a clean rendered score page for cross-system visual comparison.
+
+`bps_xml_alignment.py` parses MusicXML timing and creates page-level
+alignment candidates. The current implementation includes pickup-aware
+measure timing, note and chord endpoint handling, and BPSD note-ID
+attachment when the required source annotation is available.
+
+The supporting slur tools create visual QA material:
+
+- `slur_endpoint_check.py`: inspect one MusicXML slur's endpoint notes;
+- `scan_only_slur_check.py`: inspect a slur visible in the scan but not
+  matched to MusicXML;
+- `cross_system_slur_check.py`: inspect a slur that crosses a system
+  break;
+- `slur_batch_candidates.py`: produce ranked endpoint candidates; and
+- `slur_batch_endpoint_sheet.py`: generate batch review sheets.
+
+Candidate or scan-only results are not treated as confirmed annotations.
+Uncertain fields remain blank until they can be supported by the source
+data or human review.
+
+Example:
+
+```bash
+python bps_xml_alignment.py \
+  --image /path/to/page.jpeg \
+  --yolo /path/to/page.txt \
+  --notes-json /path/to/notes.json \
+  --xml /path/to/score.xml \
+  --bps-notes /path/to/ann_score_note.csv \
+  --output-dir /path/to/output \
+  --all-symbols
+```
+
+Run `python bps_xml_alignment.py --help` for the complete set of
+options. Dataset files, human-review CSV files, and generated QA images
+remain local and are not committed.
+
 ## Project structure
 
 ```text
 .
 ├── app.py
+├── bps_xml_alignment.py
 ├── converter.py
+├── cross_system_slur_check.py
 ├── requirements.txt
+├── scan_only_slur_check.py
+├── slur_batch_candidates.py
+├── slur_batch_endpoint_sheet.py
+├── slur_endpoint_check.py
 └── tests
-    └── test_converter.py
+    ├── test_bps_xml_alignment.py
+    ├── test_converter.py
+    └── test_slur_batch_candidates.py
 ```
 
 ## Data and privacy
@@ -161,13 +220,15 @@ redistribution rights to the copyright holder.
 
 ## Current scope
 
-The current version covers the first BPS-OMR annotation stage:
+The Streamlit application covers the first BPS-OMR annotation stage:
 
 ```text
 class_id, x, y, w, h
 ```
 
-It does not yet generate the complete semantic annotation fields such as musical time, measure positions, note IDs, connected notes, or stem direction.
+The offline research scripts can generate MusicXML-based alignment
+candidates for selected symbol classes. They do not yet provide a fully
+automatic, fully reviewed export of every semantic annotation field.
 
 ## Disclaimer
 

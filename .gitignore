@@ -22,9 +22,11 @@ venv/
 data/
 uploads/
 outputs/
+output/
 notes.json
 labels/
 images/
+tmp/
 
 # Generated QA and spreadsheet files
 first_box_test.png
@@ -32,6 +34,12 @@ all_boxes_test.png
 *_QA.png
 Beethoven_*.csv
 Beethoven_*.xlsx
+dynamicF_alignment.csv
+dynamicF_preview/
+dynamicF_xml_overlay.png
+
+# Local prototype with machine-specific input paths
+preview_dynamicf_alignment.py
 
 # Private tutorial documents
 BPSD_YOLO_自動轉換系統詳細流程.md
