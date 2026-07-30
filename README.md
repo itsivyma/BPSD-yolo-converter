@@ -148,36 +148,21 @@ Example:
 The four bounding-box coordinates are normalized values between `0`
 and `1`.
 
-## TXT-to-CSV utility
+## Separate TXT-to-CSV project
 
-The repository also retains the earlier Streamlit annotation converter.
-Its original release is preserved on the
+The earlier Streamlit annotation converter is maintained separately on
+the
 [`txt-to-csv`](https://github.com/itsivyma/BPSD-yolo-converter/tree/txt-to-csv)
-branch.
+branch. The Streamlit application, converter module, dependencies, and
+tests are intentionally excluded from `main`.
 
-Run the local application with:
+To work on that project locally:
 
 ```bash
+git switch txt-to-csv
+python -m pip install -r requirements.txt
 python -m streamlit run app.py
 ```
-
-The application can:
-
-- validate YOLO coordinates and class IDs;
-- match TXT files and score images by filename;
-- export a five-column page CSV;
-- draw a QA overlay;
-- group sonata pages into a multi-sheet Excel workbook; and
-- reject malformed, oversized, or duplicate uploads.
-
-Its five-column output is:
-
-```text
-class_id,x,y,w,h
-```
-
-This Streamlit workflow is separate from the MusicXML semantic
-alignment scripts.
 
 ## Run tests
 
@@ -189,9 +174,7 @@ python -m pytest -v
 
 ```text
 .
-├── app.py
 ├── bps_xml_alignment.py
-├── converter.py
 ├── cross_system_slur_check.py
 ├── requirements.txt
 ├── scan_only_slur_check.py
@@ -200,7 +183,6 @@ python -m pytest -v
 ├── slur_endpoint_check.py
 └── tests
     ├── test_bps_xml_alignment.py
-    ├── test_converter.py
     └── test_slur_batch_candidates.py
 ```
 
