@@ -1,45 +1,74 @@
-# BPSD YOLO Converter & QA
+# BPSD MusicXML–YOLO Alignment & QA
 
-A local Streamlit application for validating YOLO bounding-box annotations, converting them to CSV or Excel, and drawing the boxes back onto score images for visual quality assurance.
+Offline research tools for aligning YOLO symbol boxes on scanned BPSD
+score pages with MusicXML events and BPSD note annotations.
 
-## Features
+The project creates candidate semantic links and visual QA material. It
+does not assume that a YOLO box and a MusicXML event share an ID, and it
+does not treat geometric proximity as proof. Unsupported or uncertain
+BPS-OMR fields remain blank until they can be verified from source data
+or human review.
 
-- Read Label Studio YOLO TXT files.
-- Read `notes.json` class ID mappings.
-- Validate bounding-box values and class IDs.
-- Match TXT files with images by filename.
-- Convert normalized YOLO coordinates to pixel coordinates.
-- Draw bounding boxes back onto score images.
-- Download a five-column CSV for the selected page.
-- Download a QA overlay PNG.
-- Group pages from the same sonata into a multi-sheet Excel workbook.
-- Run automated coordinate tests with pytest.
-- Reject malformed, oversized, or duplicate uploaded files.
-- Sanitize Excel worksheet names and filename-like text.
-- Experimentally align scan-page YOLO symbols with BPSD MusicXML and
-  note annotations for offline QA.
+## Current capabilities
 
-## YOLO format
+- Read a scanned score page, YOLO TXT annotations, and `notes.json`.
+- Detect piano systems, staves, and approximate measure boundaries from
+  the target scan.
+- Parse MusicXML notes, measures, divisions, time signatures, dynamics,
+  slurs, ties, voices, and staves.
+- Convert MusicXML event positions to pickup-aware BPSD musical time.
+- Attach BPSD note IDs when a corresponding note annotation is
+  available, including notes that fall within a BPSD tied span.
+- Match `dynamicF`, `dynamicP`, and `dynamicS` to MusicXML dynamic
+  events in page reading order.
+- Preserve `fingering1`–`fingering5` boxes while leaving unsupported
+  semantic links blank by default.
+- Generate slur endpoint candidates and visual QA sheets, including
+  scan-only and cross-system cases.
+- Keep confirmed, candidate, unresolved, and scan-only results
+  distinguishable during review.
 
-Each annotation row contains five values:
+## Evidence and review rules
 
-```text
-class_id x_center y_center width height
-```
+The input sources contribute different information:
 
-Example:
+| Source | Information used |
+| --- | --- |
+| YOLO TXT | Class ID and normalized bounding-box geometry |
+| `notes.json` | Class ID to class-name mapping |
+| Scan image | Staff, system, barline, and glyph geometry |
+| MusicXML | Musical structure, timing, pitch, voice, staff, slur, and tie events |
+| BPSD note annotations | BPSD note IDs and note timing |
 
-```text
-18 0.201429 0.228247 0.022286 0.017574
-```
+There is no universal ID shared by YOLO and MusicXML. The tools therefore
+produce alignments by combining score structure and geometry, then
+expose uncertain cases for review.
 
-The four bounding-box coordinates are normalized values between `0` and `1`.
+The default policy is conservative:
 
-## Validation colors
+- MusicXML-supported values may be written when the correspondence is
+  established.
+- Candidate values remain labeled as candidates.
+- Unknown fields stay blank rather than being guessed.
+- `--infer-fingerings` is optional and non-authoritative because the
+  current source MusicXML contains no fingering elements.
+- Repeat mapping must be checked before extending the workflow across
+  a whole sonata.
 
-- Red: error
-- Dark orange: warning
-- Blue: valid bounding box
+## Alignment inputs
+
+The main alignment command uses external copies of:
+
+- a scanned score page;
+- the matching YOLO `.txt` file;
+- the matching `notes.json`;
+- the corresponding BPSD MusicXML file; and
+- the corresponding BPSD note annotation CSV.
+
+A clean rendered score page is also used by the cross-system slur QA
+tool.
+
+Dataset files are not included in this repository.
 
 ## Installation
 
@@ -56,121 +85,7 @@ Install the dependencies:
 python -m pip install -r requirements.txt
 ```
 
-## Run the application
-
-```bash
-python -m streamlit run app.py
-```
-
-Open the local URL displayed by Streamlit, usually:
-
-```text
-http://localhost:8501
-```
-
-## Input files
-
-The application accepts:
-
-- One `notes.json`
-- One or more YOLO `.txt` files
-- One or more `.jpg`, `.jpeg`, or `.png` images
-
-TXT files and images are matched by filename stem:
-
-```text
-Beethoven_Op090-01-01.txt
-Beethoven_Op090-01-01.jpeg
-```
-
-Each file can be up to 5 MB for JSON/TXT or 50 MB for
-images. At most 100 TXT files and 100 images can be processed
-in one run. Duplicate TXT filenames and duplicate image stems
-are rejected instead of being overwritten silently.
-
-## Outputs
-
-### Page CSV
-
-Each selected page can be downloaded as a five-column CSV:
-
-```text
-class_id,x,y,w,h
-```
-
-### QA PNG
-
-The selected page can be downloaded with its bounding boxes drawn over the original image.
-
-### Sonata Excel workbook
-
-Pages with the same sonata prefix can be downloaded as one `.xlsx` workbook.
-
-Page filenames must end with two numeric parts in this form:
-
-```text
-<sonata name>-<movement number>-<page number>
-```
-
-The sonata name itself may contain hyphens. For example,
-`Composer-Name_Op090-01-06.txt` belongs to
-`Composer-Name_Op090.xlsx`.
-
-Example:
-
-```text
-Beethoven_Op090.xlsx
-├── Summary
-├── Beethoven_Op090-01-01
-├── Beethoven_Op090-01-02
-└── ...
-```
-
-Each page worksheet contains:
-
-```text
-class_id | x | y | w | h
-```
-
-## Run tests
-
-```bash
-python -m pytest -v
-```
-
-## Experimental MusicXML alignment
-
-The alignment tools are a separate offline research workflow. They do
-not change the five-column output of the Streamlit application.
-
-The workflow uses external copies of:
-
-- a scanned score page and its YOLO TXT file;
-- the matching `notes.json` class mapping;
-- the matching BPSD MusicXML file;
-- BPSD note annotations when note IDs are required; and
-- a clean rendered score page for cross-system visual comparison.
-
-`bps_xml_alignment.py` parses MusicXML timing and creates page-level
-alignment candidates. The current implementation includes pickup-aware
-measure timing, note and chord endpoint handling, and BPSD note-ID
-attachment when the required source annotation is available.
-
-The supporting slur tools create visual QA material:
-
-- `slur_endpoint_check.py`: inspect one MusicXML slur's endpoint notes;
-- `scan_only_slur_check.py`: inspect a slur visible in the scan but not
-  matched to MusicXML;
-- `cross_system_slur_check.py`: inspect a slur that crosses a system
-  break;
-- `slur_batch_candidates.py`: produce ranked endpoint candidates; and
-- `slur_batch_endpoint_sheet.py`: generate batch review sheets.
-
-Candidate or scan-only results are not treated as confirmed annotations.
-Uncertain fields remain blank until they can be supported by the source
-data or human review.
-
-Example:
+## Run the alignment
 
 ```bash
 python bps_xml_alignment.py \
@@ -183,9 +98,92 @@ python bps_xml_alignment.py \
   --all-symbols
 ```
 
-Run `python bps_xml_alignment.py --help` for the complete set of
-options. Dataset files, human-review CSV files, and generated QA images
-remain local and are not committed.
+Run the following command for all available options:
+
+```bash
+python bps_xml_alignment.py --help
+```
+
+The alignment command writes a CSV, QA overlays, and a JSON report to
+the selected output directory. With `--all-symbols`, unsupported
+semantic fields are retained as blank values.
+
+## Slur QA tools
+
+- `slur_endpoint_check.py`: inspect the endpoint notes of one MusicXML
+  slur.
+- `scan_only_slur_check.py`: inspect a slur visible in the scan but not
+  matched to MusicXML.
+- `cross_system_slur_check.py`: inspect the two visible segments of a
+  slur crossing a system break.
+- `slur_batch_candidates.py`: rank endpoint candidates and combine
+  earlier human-review decisions.
+- `slur_batch_endpoint_sheet.py`: generate batch endpoint review sheets.
+
+Batch results use explicit review states:
+
+- `locked_xml_match`: confirmed MusicXML match.
+- `locked_scan_only`: confirmed scan-only slur.
+- `high_confidence_candidate`: promising candidate, not yet confirmed.
+- `needs_review`: insufficient or conflicting evidence.
+- `possible_scan_only`: no sufficiently supported MusicXML match yet.
+
+Only the two `locked_*` states represent previously confirmed review
+decisions.
+
+## YOLO format
+
+Each YOLO annotation row contains:
+
+```text
+class_id x_center y_center width height
+```
+
+Example:
+
+```text
+18 0.201429 0.228247 0.022286 0.017574
+```
+
+The four bounding-box coordinates are normalized values between `0`
+and `1`.
+
+## TXT-to-CSV utility
+
+The repository also retains the earlier Streamlit annotation converter.
+Its original release is preserved on the
+[`txt-to-csv`](https://github.com/itsivyma/BPSD-yolo-converter/tree/txt-to-csv)
+branch.
+
+Run the local application with:
+
+```bash
+python -m streamlit run app.py
+```
+
+The application can:
+
+- validate YOLO coordinates and class IDs;
+- match TXT files and score images by filename;
+- export a five-column page CSV;
+- draw a QA overlay;
+- group sonata pages into a multi-sheet Excel workbook; and
+- reject malformed, oversized, or duplicate uploads.
+
+Its five-column output is:
+
+```text
+class_id,x,y,w,h
+```
+
+This Streamlit workflow is separate from the MusicXML semantic
+alignment scripts.
+
+## Run tests
+
+```bash
+python -m pytest -v
+```
 
 ## Project structure
 
@@ -208,28 +206,29 @@ remain local and are not committed.
 
 ## Data and privacy
 
-This repository does not include score images, annotations, exported CSV files, Excel workbooks, or other dataset files.
+This repository does not include score images, MusicXML files, YOLO
+annotations, BPSD annotations, human-review CSV files, generated QA
+images, exported spreadsheets, or other dataset files.
 
-Uploaded files are processed by the locally running Streamlit application.
-
-## License
-
-No software license has been selected yet. Until a license is
-added, copyright law reserves reuse, modification, and
-redistribution rights to the copyright holder.
+Machine-specific prototypes and input paths are intentionally excluded
+from version control.
 
 ## Current scope
 
-The Streamlit application covers the first BPS-OMR annotation stage:
+This is a research alignment and QA workflow, not a finished
+whole-dataset converter. Dynamic MusicXML timing is currently supported
+for `dynamicF`, `dynamicP`, and `dynamicS`. Fingering links and
+unconfirmed slur correspondences require review, and unsupported
+BPS-OMR semantic fields remain blank.
 
-```text
-class_id, x, y, w, h
-```
+## License
 
-The offline research scripts can generate MusicXML-based alignment
-candidates for selected symbol classes. They do not yet provide a fully
-automatic, fully reviewed export of every semantic annotation field.
+No software license has been selected yet. Until a license is added,
+copyright law reserves reuse, modification, and redistribution rights
+to the copyright holder.
 
 ## Disclaimer
 
-This is an independent annotation-conversion and QA utility. Dataset files must be obtained and used according to their original licenses and terms.
+This is an independent annotation-alignment and QA utility. Dataset
+files must be obtained and used according to their original licenses
+and terms.
